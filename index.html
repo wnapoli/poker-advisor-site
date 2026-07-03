@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Poker Advisor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #076324; font-family: Arial, sans-serif; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .container { background: #054d1b; border-radius: 20px; padding: 40px; width: 620px; max-width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+  h1 { color: #f0c040; text-align: center; font-size: 28px; margin-bottom: 6px; letter-spacing: 2px; }
+  .sub { color: #6aaa7a; text-align: center; font-size: 12px; margin-bottom: 26px; }
+  .section { margin-bottom: 24px; }
+  .section label { color: #aed6a0; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 8px; }
+  .cards-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  input[type=text] { width: 70px; padding: 12px; border-radius: 8px; border: 2px solid #2a7a3b; background: #fff; font-size: 20px; text-align: center; font-weight: bold; color: #111; }
+  input[type=text]:focus { outline: none; border-color: #f0c040; }
+  button { width: 100%; padding: 16px; background: #f0c040; color: #111; font-size: 18px; font-weight: bold; border: none; border-radius: 10px; cursor: pointer; margin-top: 10px; letter-spacing: 1px; }
+  button:hover { background: #ffd700; }
+  .hint { color: #6aaa7a; font-size: 12px; margin-top: 6px; }
+  .error { color: #ffb4a8; background: rgba(192,57,43,0.25); border-radius: 8px; padding: 10px 14px; margin-top: 16px; font-size: 14px; display: none; }
+  .loading { color: #f0c040; text-align: center; margin-top: 20px; display: none; font-size: 16px; }
+  .results { margin-top: 24px; display: none; }
+  .street-card { border-radius: 12px; padding: 16px 20px; margin-bottom: 10px; }
+  .street-card.fold { background: #c0392b; }
+  .street-card.call { background: #2980b9; }
+  .street-card.raise { background: #27ae60; }
+  .street-card .top { display: flex; justify-content: space-between; align-items: center; }
+  .street-card .street-name { color: rgba(255,255,255,0.8); font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+  .street-card .action { color: white; font-size: 28px; font-weight: bold; letter-spacing: 2px; }
+  .street-card .stats { display: flex; gap: 20px; margin-top: 10px; }
+  .stat { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 8px 14px; text-align: center; }
+  .stat .val { color: white; font-size: 20px; font-weight: bold; }
+  .stat .lbl { color: rgba(255,255,255,0.7); font-size: 11px; text-transform: uppercase; margin-top: 2px; }
+  footer { color: #4c8a5e; text-align: center; font-size: 11px; margin-top: 22px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🃏 Poker Advisor</h1>
+  <p class="sub">Runs entirely in your browser — XGBoost on 100k+ hands</p>
+
+  <div class="section">
+    <label>Your Hole Cards</label>
+    <div class="cards-row">
+      <input type="text" id="h1" placeholder="Ah" maxlength="3">
+      <input type="text" id="h2" placeholder="Ks" maxlength="3">
+    </div>
+    <div class="hint">Ranks: A K Q J T 9–2 &nbsp;|&nbsp; Suits: h s d c &nbsp;(e.g. Ah, Ks, Td)</div>
+  </div>
+
+  <div class="section">
+    <label>Flop <span class="hint">(optional)</span></label>
+    <div class="cards-row">
+      <input type="text" id="f1" placeholder="Qd" maxlength="3">
+      <input type="text" id="f2" placeholder="Jc" maxlength="3">
+      <input type="text" id="f3" placeholder="2h" maxlength="3">
+    </div>
+  </div>
+
+  <div class="section">
+    <label>Turn <span class="hint">(optional)</span></label>
+    <div class="cards-row"><input type="text" id="t1" placeholder="9s" maxlength="3"></div>
+  </div>
+
+  <div class="section">
+    <label>River <span class="hint">(optional)</span></label>
+    <div class="cards-row"><input type="text" id="r1" placeholder="3d" maxlength="3"></div>
+  </div>
+
+  <button id="advice-btn">GET ADVICE</button>
+  <div class="error" id="error"></div>
+  <div class="loading" id="loading">⏳ Calculating odds…</div>
+  <div class="results" id="results"></div>
+
+  <footer>
+    Educational tool — no data leaves your device.<br>
+    Advice reflects a model trained on simulated hands; not gambling advice.
+  </footer>
+</div>
+
+<script src="data.js"></script>
+<script src="poker.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const errorEl = $('error'), loadingEl = $('loading'), resultsEl = $('results');
+
+  function showError(msg) {
+    errorEl.textContent = msg; errorEl.style.display = 'block';
+    resultsEl.style.display = 'none'; loadingEl.style.display = 'none';
+  }
+
+  function render(results) {
+    let html = '';
+    for (const [street, info] of Object.entries(results)) {
+      html += `
+        <div class="street-card ${info.action}">
+          <div class="top">
+            <span class="street-name">${street.toUpperCase()}</span>
+            <span class="action">${info.action.toUpperCase()}</span>
+          </div>
+          <div class="stats">
+            <div class="stat"><div class="val">${info.win_equity}%</div><div class="lbl">Win Equity</div></div>
+            <div class="stat"><div class="val">${info.confidence.toFixed(1)}%</div><div class="lbl">Confidence</div></div>
+          </div>
+        </div>`;
+    }
+    resultsEl.innerHTML = html;
+    resultsEl.style.display = 'block';
+    loadingEl.style.display = 'none';
+  }
+
+  function getAdvice() {
+    errorEl.style.display = 'none';
+    const norm = (id) => window.PokerCore.normalizeKey($(id).value);
+    const rawFilled = (id) => $(id).value.trim() !== '';
+
+    const h1 = norm('h1'), h2 = norm('h2');
+    if (!h1 || !h2) return showError('Enter two valid hole cards (e.g. Ah, Ks).');
+
+    const flopRaw = ['f1', 'f2', 'f3'].map(rawFilled);
+    const flopAny = flopRaw.some(Boolean), flopAll = flopRaw.every(Boolean);
+    if (flopAny && !flopAll) return showError('Enter all three flop cards, or leave the flop empty.');
+
+    let flop = null, turn = null, river = null;
+    if (flopAll) {
+      flop = ['f1', 'f2', 'f3'].map(norm);
+      if (flop.some((c) => !c)) return showError('One of the flop cards is not valid.');
+
+      if (rawFilled('t1')) {
+        turn = norm('t1');
+        if (!turn) return showError('The turn card is not valid.');
+      }
+      if (rawFilled('r1')) {
+        if (!turn) return showError('Enter a turn card before the river.');
+        river = norm('r1');
+        if (!river) return showError('The river card is not valid.');
+      }
+    } else if (rawFilled('t1') || rawFilled('r1')) {
+      return showError('Enter the flop before the turn or river.');
+    }
+
+    const all = [h1, h2, ...(flop || []), turn, river].filter(Boolean);
+    if (new Set(all).size !== all.length) return showError('Duplicate card — each card can appear only once.');
+
+    loadingEl.style.display = 'block';
+    resultsEl.style.display = 'none';
+    // Defer so the loading state paints before the (synchronous) simulation runs.
+    setTimeout(() => {
+      try {
+        render(window.PokerCore.advise({ hole: [h1, h2], flop, turn, river }));
+      } catch (e) {
+        showError('Something went wrong: ' + e.message);
+      }
+    }, 20);
+  }
+
+  $('advice-btn').addEventListener('click', getAdvice);
+  document.querySelectorAll('input[type=text]').forEach((el) =>
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') getAdvice(); })
+  );
+</script>
+</body>
+</html>
